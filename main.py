@@ -520,7 +520,7 @@ bot.remove_command('help')
 
 #init mistral client
 
-api_key = "Hhh1jY7JEOwaAA4r0RgLhUbMm8AN6irH"
+api_key = cs.mistral_key
 model = "mistral-medium"
 
 client = MistralAsyncClient(api_key=api_key)

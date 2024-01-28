@@ -523,6 +523,8 @@ bot.remove_command('help')
 api_key = cs.mistral_key
 model = "mistral-medium"
 
+stop = False
+
 client = MistralAsyncClient(api_key=api_key)
 
 #list of engines and their location as well as storing games
@@ -650,6 +652,7 @@ async def run_chat_send( queue):
 async def on_message(message, is_edit = False):
     #get message data and print it to the console
     global message_history
+    global stop
     print("Message Recived!")
     if message.guild == None:
        print(f"Channel sent: {message.channel.id} in \"{message.channel}\"")
@@ -690,10 +693,18 @@ async def on_message(message, is_edit = False):
                     if not queue.empty():
                         queue.get_nowait()
                     await queue.put((cur, None, current))
+                elif stop:
+                    stop = False
+                    message_history.add(ChatMessage(role="assistant", content=total+"- (Stopped by User)"))
+                    if not queue.empty():
+                        queue.get_nowait()
+                    await queue.put((cur+"- (Stopped)", None, current))
+                    await message.reply("MistralAI was responding, all chat streams have been stopped!")
+                    break
                 else:
                     if len(cur) > 1950:
                         cur = [cur[i:i + 1950] for i in range(0, len(cur), 1950)][-1]
-                        current = await message.channel.reply("...")
+                        current = await message.reply("...")
                     elif not queue.empty():
                         queue.get_nowait()
                     await queue.put((cur, True, current))
@@ -789,7 +800,7 @@ async def getinf(ctx, id):
             print(check.status_code)
             fstream = io.BytesIO(base64.b64decode(check.json()['video']))
             fstream.seek(0)
-            await ctx.send(file=discord.File(fstream, filename="video.mp4"))
+            await ctx.reply(file=discord.File(fstream, filename="video.mp4"))
             break
         elif check.status_code == 202:
             print(check.status_code)
@@ -801,7 +812,7 @@ async def getinf(ctx, id):
         await asyncio.sleep(2)
 
 @bot.command()
-async def imgtovid(ctx):
+async def imgtovid(ctx, motion: int = 40):
     url = "https://api.stability.ai/v2alpha/generation/image-to-video"
     if len(ctx.message.attachments) == 0:
         await ctx.send("You must attach an image to this command!")
@@ -810,26 +821,35 @@ async def imgtovid(ctx):
         await ctx.send("You can only attach one image at a time!")
         return
     await ctx.reply("Please note that this may take a while to generate!")
+    if motion > 255 or motion < 1:
+        await ctx.reply("`Motion` parameter must be between 255 and 1")
+    # Assuming org_image is obtained from ctx.message.attachments[0].read()
     org_image = await ctx.message.attachments[0].read()
     img = Image.open(io.BytesIO(org_image))
-
-    aspect_ratio = img.width / img.height
-
-    new_width = 768
-    new_height = int(768 / aspect_ratio)
-
-    resized_img = ImageOps.fit(img, (new_width, new_height), method=Image.ANTIALIAS)
-
-    padding_height = 768 - new_height
-    padding_top = padding_height // 2
-    padding_bottom = padding_height - padding_top
-    padding_left = 0
-    padding_right = 0
-
+    
+    max_size = 768
+    
+    # Determine which dimension is larger and calculate new size maintaining aspect ratio.
+    if img.width > img.height:
+        # Image is wider than it is tall.
+        new_width = max_size
+        new_height = int(max_size * (img.height / img.width))
+    else:
+        # Image is taller than it is wide.
+        new_height = max_size
+        new_width = int(max_size * (img.width / img.height))
+    
+    resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
+    
+    # Calculate padding to center the image within a square of size max_size x max_size.
+    padding_left   = (max_size - new_width) // 2
+    padding_top    = (max_size - new_height) // 2
+    padding_right  = max_size - new_width - padding_left
+    padding_bottom = max_size - new_height - padding_top
+    
     padded_img = ImageOps.expand(resized_img, border=(padding_left, padding_top, padding_right, padding_bottom), fill='black')
-
+    
     print(padded_img.size)
-
 
     byte_stream = io.BytesIO()
     padded_img.save(byte_stream, format='PNG')
@@ -839,7 +859,7 @@ async def imgtovid(ctx):
         'image': ('image.png', byte_stream, 'image/png'),
         'seed': (None, '0'),
         'cfg_scale': (None, '2.5'),
-        'motion_bucket_id': (None, '40')
+        'motion_bucket_id': (None, motion)
     }
     headers = {
         'Authorization': f"Bearer {cs.stability_key}"
@@ -1798,6 +1818,11 @@ async def print_history(ctx):
 async def copypasta(ctx):
     global bag
     await ctx.send(bag.draw())
+
+@bot.command()
+async def stopstream(ctx):
+    global stop
+    stop = True
 
 @bot.command()
 async def coin(ctx, flips = 1):

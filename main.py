@@ -793,23 +793,31 @@ async def getinf(ctx, id):
             "Accept": "application/json",
         }
     while True:
+        try:
+            check = requests.get(f"{url}/result/{id}", headers=headers2)
         
-        check = requests.get(f"{url}/result/{id}", headers=headers2)
+            if check.status_code == 200:
+                print(check.status_code)
+                fstream = io.BytesIO(base64.b64decode(check.json()['video']))
+                fstream.seek(0)
+                await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="video.mp4"))
+                break
+            elif check.status_code == 202:
+                _ = ""
+            else:
+                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}")
+                break
+            await asyncio.sleep(2)
+        except Exception as e:
+            await ctx.reply(f"There was an error getting the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}\nError Details: {e}")
+            break
 
-        if check.status_code == 200:
-            print(check.status_code)
-            fstream = io.BytesIO(base64.b64decode(check.json()['video']))
-            fstream.seek(0)
-            await ctx.reply(file=discord.File(fstream, filename="video.mp4"))
-            break
-        elif check.status_code == 202:
-            print(check.status_code)
-            print("Waiting for result...")
-        else:
-            print(check.status_code)
-            print(check.content)
-            break
-        await asyncio.sleep(2)
+@bot.command()
+async def getvid(ctx, id = None):
+    if id == None:
+        await ctx.send("You must input an id!")
+        return
+    await getinf(ctx, id)
 
 @bot.command()
 async def imgtovid(ctx, motion: int = 40):

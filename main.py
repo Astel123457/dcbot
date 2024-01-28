@@ -529,9 +529,9 @@ client = MistralAsyncClient(api_key=api_key)
 
 #list of engines and their location as well as storing games
 engines = {
-    "stockfish": "C:\\Users\\rdina\\Downloads\\stockfish-windows-x86-64-avx2\\stockfish\\stockfish-windows-x86-64-avx2.exe",
-    "lc0": "C:\\Users\\rdina\\Downloads\\lc0-v0.30.0-windows-gpu-nvidia-cudnn\\lc0.exe",
-    "komodo": "C:\\Users\\rdina\\Downloads\\komodo-14\\komodo-14_224afb\\Windows\\komodo-14.1-64bit.exe"
+    "stockfish": "stockfish-windows-x86-64-avx2.exe",
+    "lc0": "lc0.exe",
+    "komodo": "komodo-14.1-64bit-bmi2.exe"
 }
 
 #all this is for Stable Diffusion

@@ -521,7 +521,7 @@ bot.remove_command('help')
 #init mistral client
 
 api_key = cs.mistral_key
-model = "mistral-medium"
+model = "mistral-medium-latest"
 
 stop = False
 
@@ -534,9 +534,9 @@ engines = {
     "komodo": "komodo-14.1-64bit-bmi2.exe"
 }
 
-#all this is for Stable Diffusion
-
 games = {}
+
+#all this is for Stable Diffusion
 
 sd_quality = {}
 
@@ -639,6 +639,7 @@ async def on_message_edit(before, after):
 async def run_chat_send( queue):
     while True:
         srn, stop, ctx = await queue.get()
+        print("thing")
         if stop is not None:
             try:
                 await ctx.edit(content=srn+"...")
@@ -786,15 +787,11 @@ async def try_resend_file(ctx, file_objects):
     else:
         await ctx.send(files=file_objects)
 
-async def getinf(ctx, id):
+async def getinf(ctx, url, headers, id, filename):
     url = "https://api.stability.ai/v2alpha/generation/image-to-video"
-    headers2 = {
-            'Authorization': f"Bearer {cs.stability_key}",
-            "Accept": "application/json",
-        }
     while True:
         try:
-            check = requests.get(f"{url}/result/{id}", headers=headers2)
+            check = requests.get(f"{url}/result/{id}", headers=headers)
         
             if check.status_code == 200:
                 print(check.status_code)
@@ -802,10 +799,11 @@ async def getinf(ctx, id):
                 fstream.seek(0)
                 await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="video.mp4"))
                 break
-            elif check.status_code == 202:
-                _ = ""
-            else:
-                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}")
+            elif check.status_code == 403:
+                await ctx.reply(f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {check.text}")
+                return
+            elif check.status_code != 202:
+                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again. (This also works for `!promptupscale`)\nID: {id}")
                 break
             await asyncio.sleep(2)
         except Exception as e:
@@ -872,9 +870,53 @@ async def imgtovid(ctx, motion: int = 40):
     headers = {
         'Authorization': f"Bearer {cs.stability_key}"
     }
+    headers2 = {
+        'Authorization' : f"Bearer {cs.stability_key}",
+        'Accept' : 'application/json'
+    }
     response = requests.post(url, files=payload, headers=headers)
     print(response.json()["id"])
-    task = asyncio.create_task(getinf(ctx, response.json()["id"]))
+    task = asyncio.create_task(getinf(ctx, url, headers2, response.json()["id"], "video.mp4"))
+
+@bot.command()
+async def promptupscale(ctx, *, prompt):
+    url = "https://api.stability.ai/v2alpha/generation/stable-image/upscale"
+    await ctx.reply("Please note that this may take a while to generate!")
+    if len(ctx.message.attachments) == 0:
+        await ctx.send("You must attach an image to this command!")
+        return
+    padded_img = Image.open(io.BytesIO(await ctx.message.attachments[0].read()))
+    if (padded_img.width * padded_img.height) > 1_048_576:
+        await ctx.reply("The image you provided is too large! Please provide an image that is less than 1024x1024 or approx 1M pixels.")
+        return
+    print(type(prompt))
+    byte_stream = io.BytesIO()
+    padded_img.save(byte_stream, format='PNG')
+    byte_stream.seek(0)
+    byte_stream.getvalue()
+    payload = {
+        'image': ("image.png", byte_stream)
+    }
+    data = {
+        'prompt': f"{prompt}",
+        'negative_prompt': f"{negitive_prompt}",
+        'output_format': 'png',
+        'seed': '0'
+    }
+    headers = {
+        'Authorization': f"Bearer {cs.stability_key}"
+    }
+    headers2 = {
+        'Authorization' : f"Bearer {cs.stability_key}",
+        'Accept' : 'application/json'
+    }
+    response = requests.post(url, files=payload, data=data, headers=headers)
+    print(response.json())
+    print(response.json()["id"])
+    if response.status_code == 403:
+        await ctx.reply(f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {response.text}")
+        return
+    task = asyncio.create_task(getinf(ctx, url, headers2, response.json()["id"], "image.png"))
 
 
 @bot.command()
@@ -1039,7 +1081,6 @@ async def msd(ctx, *, prompt):
     mistral = mistral.choices[0].message.content
     await dels.delete()
     await sd(ctx, prompt=prompt, mistral_prompt=mistral)
-
 
 @bot.command()
 async def upscale(ctx, multiplier = "1.2", internal=False, image = None):

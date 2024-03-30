@@ -47,6 +47,20 @@ class ChatMemory:
         if not list:
             return "\n".join(history)
         return history
+    
+    def construct_history_print(self, list=True):
+        """
+        Construct the chat history from the chat memory
+
+        :param list: Whether to return the history as a list or a string
+        """
+
+        history = []
+        for message in self.memory:
+            history.append(f"{message.role}: {message.content}")
+        if not list:
+            return "\n".join(history)
+        return history
 
     def clean(self):
         """
@@ -70,7 +84,6 @@ class ChatMemory:
         self.memory.clear()
         if self.prompt is not None:
             self.memory.append(self.prompt)
-        print(self.memory)
 
     def save(self):
         """
@@ -89,6 +102,15 @@ class ChatMemory:
             self.memory = pickle.load(f)
 
         return self
+    
+    def remove_idx(self, idx):
+        """
+        Remove a message from the chat memory by index
+
+        :param idx: Index of the message to remove
+        """
+        self.memory.pop(idx)
+        return self
 
     def set_prompt(self, prompt):
         """
@@ -99,4 +121,3 @@ class ChatMemory:
         """
         self.prompt = ChatMessage(role="system", content=prompt)
         self.memory.insert(0, self.prompt)
-        print(self.memory)

@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 import asyncio
 from discord.ext import commands
 from mistralai.async_client import MistralAsyncClient
@@ -8,11 +9,13 @@ import torch
 from torchvision import models
 import torchvision.transforms as transforms
 import requests
+import catbox
 import io
 import numpy as np
 import base64
 from PIL import Image, ImageEnhance, ImageOps, ImageSequence
 import json
+import traceback
 import time
 import chess
 import chess.engine
@@ -38,10 +41,14 @@ activity = discord.Activity(name='you poop, smells nice >:3', type=discord.Activ
 bot = commands.Bot(command_prefix='!', intents=intents, activity=activity)
 bot.remove_command('help')
 
+token = cs.catbox_key
+
+uploader = catbox.Uploader(token)
+
 #init mistral client
 
 api_key = cs.mistral_key
-model = "mistral-medium-latest"
+model = "mistral-large-latest"
 
 stop = False
 
@@ -144,6 +151,11 @@ responses = {
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     print('------')
+    print("Syncing commands...")
+    await bot.tree.sync(guild=discord.Object(id=889711909379641375))
+    await bot.tree.sync()
+    print("Commands synced!")
+    print('------')
 
 @bot.event
 async def on_message_edit(before, after):
@@ -155,10 +167,18 @@ async def on_message_edit(before, after):
     else:
         await on_message(after, True)
 
-async def run_chat_send( queue):
+@bot.command()
+async def sync(ctx):
+    if ctx.author.id != 493626802644713473:
+        await ctx.send("Only Astel can run this command!")
+        return
+    print("Syncing commands...")
+    await bot.tree.sync()
+    print("Commands synced!")
+
+async def run_chat_send(queue):
     while True:
         srn, stop, ctx = await queue.get()
-        print("thing")
         if stop is not None:
             try:
                 await ctx.edit(content=srn+"...")
@@ -166,6 +186,7 @@ async def run_chat_send( queue):
                 await ctx.channel.send(f"oops, something went wrong while streaming {e}")
         else:
             await ctx.edit(content=srn)
+            break
         await asyncio.sleep(1)
 
 @bot.event
@@ -223,12 +244,11 @@ async def on_message(message, is_edit = False):
                     break
                 else:
                     if len(cur) > 1950:
-                        cur = [cur[i:i + 1950] for i in range(0, len(cur), 1950)][-1]
+                        cur = [cur[i:i + len(cur)] for i in range(0, len(cur), 1950)][-1]
                         current = await message.reply("...")
                     elif not queue.empty():
                         queue.get_nowait()
                     await queue.put((cur, True, current))
-            print(total)
             message_history.add(ChatMessage(role="assistant", content=total))
 
     if not is_edit:
@@ -254,16 +274,18 @@ async def on_message(message, is_edit = False):
     is_edit = False
     await bot.process_commands(message)
 
-@bot.command()
+@bot.tree.command(description="Spams a bunch of characters.")
 async def spam(ctx):
     result_str = ''.join((random.choice('qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM,.;[]1234567890-=_+') for i in range(random.randint(0,2000))))
     await ctx.send(result_str)
 
-@bot.command()
+@bot.tree.command(description="Generates a non cryptograpic password.")
 async def secure_password(ctx):
     result_str = ''.join((random.choice('qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM,.;[]1234567890-=_+') for i in range(random.randint(6,13))))
     await ctx.send("Here is a password!")
     await ctx.send(result_str)
+
+
 
 @bot.command()
 async def timer(ctx, time = 10):
@@ -307,25 +329,44 @@ async def try_resend_file(ctx, file_objects):
         await ctx.send(files=file_objects)
 
 async def getinf(ctx, url, headers, id, filename):
-    url = "https://api.stability.ai/v2alpha/generation/image-to-video"
     while True:
         try:
             check = requests.get(f"{url}/result/{id}", headers=headers)
         
             if check.status_code == 200:
                 print(check.status_code)
-                fstream = io.BytesIO(base64.b64decode(check.json()['video']))
-                fstream.seek(0)
-                await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="video.mp4"))
+                if filename == "video.mp4":
+                    try:
+                        fstream = io.BytesIO(base64.b64decode(check.json()['video']))
+                        fstream.seek(0)
+                        await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="video.mp4"))
+                    except aiohttp.client_exceptions.ClientOSError:
+                        upload = uploader.upload(file_type="mp4", file_raw=fstream)
+                        upload = upload["file"]
+                        await ctx.reply(f"ID: {id}\n{upload}")
+                else:
+                    try:
+                        fstream = io.BytesIO(base64.b64decode(check.json()['image']))
+                        fstream.seek(0)
+                        await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="image.png"))
+                    except aiohttp.client_exceptions.ClientOSError:
+                        with open("img.png", "wb") as file:
+                            file.write(fstream.read())
+                        upload = uploader.upload(file_type="png", file_raw=fstream.read())
+                        upload = upload["file"]
+                        print(upload)
+                        await ctx.reply(f"ID: {id}\n{upload}")
+                        
                 break
             elif check.status_code == 403:
                 await ctx.reply(f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {check.text}")
                 return
             elif check.status_code != 202:
-                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again. (This also works for `!promptupscale`)\nID: {id}")
+                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}")
                 break
             await asyncio.sleep(2)
         except Exception as e:
+            print(traceback.format_exc())
             await ctx.reply(f"There was an error getting the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}\nError Details: {e}")
             break
 
@@ -334,11 +375,28 @@ async def getvid(ctx, id = None):
     if id == None:
         await ctx.send("You must input an id!")
         return
-    await getinf(ctx, id)
+    headers2 = {
+        'Authorization' : f"Bearer {cs.stability_key}",
+        "Accept" : "application/json"
+    }
+    url = "https://api.stability.ai/v2beta/image-to-video"
+    await getinf(ctx, url, headers2, id, "video.mp4")
+
+@bot.command()
+async def getupscale(ctx, id = None):
+    if id == None:
+        await ctx.send("You must input an id!")
+        return
+    headers2 = {
+        'Authorization' : f"Bearer {cs.stability_key}",
+        "Accept" : "application/json"
+    }
+    url = "https://api.stability.ai/v2beta/stable-image/upscale/creative"
+    await getinf(ctx, url, headers2, id, "img.png")
 
 @bot.command()
 async def imgtovid(ctx, motion: int = 40):
-    url = "https://api.stability.ai/v2alpha/generation/image-to-video"
+    url = "https://api.stability.ai/v2beta/image-to-video"
     if len(ctx.message.attachments) == 0:
         await ctx.send("You must attach an image to this command!")
         return
@@ -399,7 +457,7 @@ async def imgtovid(ctx, motion: int = 40):
 
 @bot.command()
 async def promptupscale(ctx, *, prompt):
-    url = "https://api.stability.ai/v2alpha/generation/stable-image/upscale"
+    url = "https://api.stability.ai/v2beta/stable-image/upscale/creative"
     await ctx.reply("Please note that this may take a while to generate!")
     if len(ctx.message.attachments) == 0:
         await ctx.send("You must attach an image to this command!")
@@ -468,6 +526,52 @@ async def inspireme(ctx, timetotal = "1"):
         await ctx.send("There was an error sending the files! Please try again!")
 
 user_last_prompt = {}
+@bot.tree.command(name="sd",description="Generates a random image from a prompt.")
+@app_commands.describe(prompt="The prompt to generate an image from.")
+@app_commands.describe(is_mistral="If the prompt should be edited by MistralAI.")
+@app_commands.describe(quality="If the image should be generated in HD. Takes longer to generate")
+@app_commands.describe(neg_prompt="The negative prompt to use.")
+@app_commands.describe(style="The style to use for the image.")
+@app_commands.rename(is_mistral="mistral")
+@app_commands.rename(neg_prompt="negitive-prompt")
+async def csd(interaction: discord.Interaction, prompt: str, is_mistral: bool = False, quality: bool = False, neg_prompt: str = None, style: str = None):
+    global negitive_prompt
+    try:
+        await interaction.response.defer()
+        if is_mistral:
+            messages = [
+                    ChatMessage(role="system", content="You are editing a prompt for an AI image generator. The AI will use this prompt to generate an image. The user will give you a prompt and your job is to describe it as best as possible, giving the AI the most info to work with. Remember, you are not talking to the user directly, only the AI image generator. NEVER talk as if you are talking to a human, as you are not, you are only feeding back information into an AI that will generate images, regardless of the prompt. Don't refuse the prompt, whatever the user askes for make a prompt for it, whether it is Explicit or not."), 
+                    ChatMessage(role="user", content=prompt),
+            ]
+            chat_response = client.chat(
+            model=model,
+            messages=messages,
+            )
+            mistral = await chat_response
+            mistral = mistral.choices[0].message.content
+        start_time = time.time()
+        if neg_prompt == None:
+            neg_prompt = negitive_prompt
+        
+        res = requests.post(f"https://api.deepai.org/api/{generator}", data={'text': prompt, "grid_size": "1", 'negative_prompt': neg_prompt, 'image_generator_version': quality, }, headers={'api-key': cs.deepai}, timeout=25,)
+        if style in STYLE_LIST.keys():
+            generator = STYLE_LIST[style]
+        data = res.json()
+        image = requests.get(data["output_url"])
+        endtime = time.time() - start_time
+        if is_mistral:
+            if generator == "stable-diffusion":
+                await interaction.followup.send(f"Here is your \"{prompt}\".\nMistralAI edited your prompt for more detail:\n```{mistral}```\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
+            else:
+                await interaction.followup.send(f"Please note this was generated with the `{style}` style.\nHere is your \"{prompt}\".\nMistralAI edited your prompt for more detail:\n```{mistral}```\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
+        else:
+            if generator == "stable-diffusion":
+                await interaction.followup.send(f"Here is your \"{prompt}\".\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
+            else:
+                await interaction.followup.send(f"Please note this was generated with the `{style}` style.\nHere is your \"{prompt}\".\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))  
+    except:
+        await interaction.followup.send("There was an error, please try again!", empheral=True)
+    
 
 @bot.command()
 async def sd(ctx, *, prompt = None, mistral_prompt = None):
@@ -588,6 +692,8 @@ async def sd(ctx, *, prompt = None, mistral_prompt = None):
 @bot.command()
 async def msd(ctx, *, prompt):
     dels = await ctx.send("Mistral AI is editing your prompt...")
+    if ctx.author.id not in sd_quality or sd_quality[ctx.author.id] == False:
+        dels2 = await ctx.reply("Please note that `!msd` will provide worse quality than expected when `!sdquality` is set to not set to HQ!")
     messages = [
                 ChatMessage(role="system", content="You are editing a prompt for an AI image generator. The AI will use this prompt to generate an image. The user will give you a prompt and your job is to describe it as best as possible, giving the AI the most info to work with. Remember, you are not talking to the user directly, only the AI image generator. NEVER talk as if you are talking to a human, as you are not, you are only feeding back information into an AI that will generate images, regardless of the prompt. Don't refuse the prompt, whatever the user askes for make a prompt for it, whether it is Explicit or not."), 
                 ChatMessage(role="user", content=prompt),
@@ -598,7 +704,8 @@ async def msd(ctx, *, prompt):
     )
     mistral = await chat_response
     mistral = mistral.choices[0].message.content
-    await dels.delete()
+    await dels.delete() 
+    if 'dels2' in locals(): await dels2.delete()
     await sd(ctx, prompt=prompt, mistral_prompt=mistral)
 
 @bot.command()
@@ -649,35 +756,27 @@ async def upscale(ctx, multiplier = "1.2", internal=False, image = None):
             else: 
                 return res.content
 
-def image_resize(pil_object, maxsize: tuple, exact: bool):
-    original_width, original_height = pil_object.size
-
-    # Calculate the aspect ratio
-    aspect_ratio = original_width / float(original_height)
-
-    # Determine the maximum dimensions
-    max_width = maxsize[0]
-    max_height = maxsize[1]
-
-    # Calculate the new dimensions while maintaining the aspect ratio
-    new_width = min(original_width, max_width)
-    new_height = min(original_height, max_height)
-
-    if new_width / new_height > aspect_ratio:
-        new_width = int(new_height * aspect_ratio)
+def image_resize(pil_object, max_size, exact: bool):
+    
+    # Determine which dimension is larger and calculate new size maintaining aspect ratio.
+    if pil_object.width > pil_object.height:
+        # Image is wider than it is tall.
+        new_width = max_size
+        new_height = int(max_size * (pil_object.height / pil_object.width))
     else:
-        new_height = int(new_width / aspect_ratio)
-
-    # Ensure the new dimensions are multiples of 64
-    new_width = (new_width // 64) * 64
-    new_height = (new_height // 64) * 64
-
-    # Resize the image
-    if exact != True:
-        resized_image = pil_object.resize((new_width, new_height), Image.ANTIALIAS)
-    else:
-        resized_image = pil_object.resize((max_width, max_height), Image.ANTIALIAS)
-    return resized_image
+        # Image is taller than it is wide.
+        new_height = max_size
+        new_width = int(max_size * (pil_object.width / pil_object.height))
+    
+    resized_pil_object = pil_object.resize((new_width, new_height), Image.ANTIALIAS)
+    
+    # Calculate padding to center the image within a square of size max_size x max_size.
+    padding_left   = (max_size - new_width) // 2
+    padding_top    = (max_size - new_height) // 2
+    padding_right  = max_size - new_width - padding_left
+    padding_bottom = max_size - new_height - padding_top
+    
+    return ImageOps.expand(resized_pil_object, border=(padding_left, padding_top, padding_right, padding_bottom), fill='black')
 
 def pil_to_bytes(image):
     byte_stream = io.BytesIO()
@@ -900,7 +999,7 @@ async def inpaint(ctx, *, prompt = None):
         return
     org_image = await ctx.message.attachments[0].read()
     img = Image.open(io.BytesIO(org_image))
-    ret_image = image_resize(img, (512, 512), True)
+    ret_image = image_resize(img, 512, True)
     print(ret_image.size)
     print(img.getbands())
     if 'A' not in img.getbands():
@@ -1025,14 +1124,15 @@ async def neg_prompt(ctx, *, neg_prompt = None):
     negitive_prompt = neg_prompt
     await ctx.send(f"Negative prompt set to\n```{negitive_prompt}```!")
 
-@bot.command()
-async def dice(ctx, dice= None, num= 1):
-    num = int(num)
+@bot.tree.command(description="Rolls a <sided> dice <num> times.")
+@app_commands.describe(dice="Total sides of a dice", num="Number of times to roll the dice")
+@app_commands.rename(dice="sides", num="rolls")
+async def dice(interaction: discord.Interaction, dice: int, num: int):
     if dice == None:
-        await ctx.send("You must input a number! Usage: `!dice <dice sides> <number of rolls(optional)>`")
+        await interaction.response.send_message("You must input a number! Usage: `!dice <dice sides> <number of rolls(optional)>`")
         return
     if dice == "0":
-        await ctx.send("Your dice must have more than 0 sides!!!! Cannot roll nothing doofus!!!!")
+        await interaction.response.send_message("Your dice must have more than 0 sides!!!! Cannot roll nothing doofus!!!!")
         return
     dice = int(dice) + 1
     roll = np.random.randint(1, dice, num)
@@ -1049,9 +1149,9 @@ async def dice(ctx, dice= None, num= 1):
     rolls_list = rolls_list + ', '.join(str(e) for e in rolls)
     rolls_list = rolls_list + "]"
     if len(rolls_list) > 2000:
-        await ctx.send("Sorry, but the reply would go over Discord's character limit so we can't send it! Please reduce the number of dice rolls to help.")
+        await interaction.response.send_message("Sorry, but the reply would go over Discord's character limit so we can't send it! Please reduce the number of dice rolls to help.", empheral=True)
     else:
-        await ctx.send(rolls_list)
+        await interaction.response.send_message(rolls_list)
 
 @bot.command()
 async def choice(ctx, *, choices = None):
@@ -1094,7 +1194,7 @@ async def tile(ctx):
         tiling[ctx.author.id] = True
         await ctx.send("Tiling enabled!")
     else:
-        tiling[ctx.author.id] == False
+        tiling[ctx.author.id] = False
         await ctx.send("Tiling disabled!")
 
 @bot.command()
@@ -1295,23 +1395,32 @@ async def deepfry(ctx, color = 2.0, contrast = 2.0, sharpness = 2.0, noise = 1):
         files.append(discord.File(io.BytesIO(pil_to_bytes(noisy_img)), filename=f"deepfry_{attachment.filename}"))
     await try_resend_file(ctx, files)
 
-@bot.command()
-async def style(ctx, input = None):
+
+async def style_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    types = list(STYLE_LIST.keys())
+    return [
+        app_commands.Choice(name=search_type, value=search_type)
+        for search_type in types if current.lower() in search_type.lower()
+    ]
+
+@bot.tree.command(description="Changes the sytle of Stable Diffusion, or lists the current style.")
+@app_commands.autocomplete(input=style_autocomplete)
+async def style(interaction: discord.Interaction, input: str = None):
     global curr_style
     if input == None:
-        if ctx.author.id not in curr_style:
-            await ctx.send(f"The current style is `{curr_style['default']}`")
+        if interaction.user.id not in curr_style:
+            await interaction.send(f"The current style is `{curr_style['default']}`")
             return
-        await ctx.send(f"The current style is `{curr_style[ctx.author.id]}`!")
+        await interaction.send(f"The current style is `{curr_style[interaction.user.id]}`!")
         return
     if input.lower() == "list":
-        await ctx.send("Here is a list of supported styles!\n```" + "\n".join(STYLE_LIST.keys()) + "```")
+        await interaction.send("Here is a list of supported styles!\n```" + "\n".join(STYLE_LIST.keys()) + "```")
         return
     try:
-        curr_style[ctx.author.id] = STYLE_LIST[input.lower()]
-        await ctx.send(f"Style set to `{input}` for {ctx.author.display_name}!")
+        curr_style[interaction.user.id] = STYLE_LIST[input.lower()]
+        await interaction.send(f"Style set to `{input}` for {interaction.user.display_name}!")
     except KeyError:
-        await ctx.send("That style is not supported! Please use `!style list` to see a list of supported styles!")
+        await interaction.send("That style is not supported! Please use `!style list` to see a list of supported styles!")
 
 @bot.command()
 async def luhn_check(ctx, card):
@@ -1359,11 +1468,25 @@ async def clear(ctx):
     await ctx.send("Conversation cleared!")
 
 @bot.command()
-async def mprompt(ctx, *, prompt):
+async def mprompt(ctx, *, prompt = None):
     global message_history
+    if prompt == None:
+        await ctx.send("Current prompt is\n```"+ message_history.prompt.content + "```!")
+        return
     message_history.set_prompt(prompt)
-    await ctx.send("Prompt added!")
-    await clear(ctx)
+    if prompt.lower() == "clear":
+        if message_history.prompt != None:
+            message_history.prompt = None
+            ret = message_history.remove_idx(0)
+            print(message_history.prompt)
+            print(str(ret))
+            await ctx.send("Prompt cleared!")
+            await clear(ctx)
+        else:
+            await ctx.send("There is no prompt to clear!")
+    else:
+        await ctx.send("Prompt added!")
+        await clear(ctx) 
 
 @bot.command()
 async def mpromptnc(ctx, *, prompt):
@@ -1373,9 +1496,7 @@ async def mpromptnc(ctx, *, prompt):
 
 @bot.command()
 async def print_history(ctx):
-    await ctx.send(f"Sorry, but this command is disabled!")
-    return
-    history = message_history.construct_history()
+    history = message_history.construct_history_print(list=False)
     if len(history) > 2000:
         history = history[:2000]
     await ctx.send(f"{history}")
@@ -1392,15 +1513,36 @@ async def stopstream(ctx):
     global stop
     stop = True
 
-@bot.command()
-async def coin(ctx, flips = 1):
-    await dice(ctx, 2, flips)
+@bot.tree.command(description="Flips a coin an amount of times.")
+@app_commands.describe(flips="The amount of times to flip the coin. Default is 1.")
+async def coin(interaction: discord.Interaction, flips: int = 1):
+    if flips < 1:
+        await interaction.response.send_message("You must flip the coin at least once!")
+        return
+    dice = 3
+    roll = np.random.randint(1, dice, flips)
+    rolls = []
+    for i in roll:
+        if dice == 3: 
+            if i == 1:
+                rolls.append("Heads")
+            else:
+                rolls.append("Tails")
+        else:
+            rolls.append(i)
+    rolls_list = "["
+    rolls_list = rolls_list + ', '.join(str(e) for e in rolls)
+    rolls_list = rolls_list + "]"
+    if len(rolls_list) > 2000:
+        await interaction.response.send_message("Sorry, but the reply would go over Discord's character limit so we can't send it! Please reduce the number of dice rolls to help.", ephemeral=True)
+    else:
+        await interaction.response.send_message(rolls_list)
 
-@bot.command()
-async def dm(ctx, user:discord.Member, *, message= None):
-    print("Sending DM!")
+@bot.tree.command(description="Sends a message to a specified user.")
+@app_commands.describe(user="The user to DM.", message="The message to send.")
+async def dm(interaction: discord.Interaction, user: discord.Member, message: str):
     await user.send(message)
-    print("DM sent!")
+    await interaction.response.send_message("DM sent!", ephemeral=True)
 
 async def main():
     global cog
@@ -1408,8 +1550,15 @@ async def main():
     await bot.add_cog(Music(bot))
     await bot.start(cs.bot_token)
 
+async def b_close():
+    for cog_name in list(bot.cogs.keys()):
+        await bot.remove_cog(cog_name)
+    await bot.close()
+
 try:
     asyncio.run(main())
-except:
+except KeyboardInterrupt:
     print("Exception, saving chat memory")
     message_history.save()
+    print("memory saved, closing bot")
+    asyncio.run(b_close())

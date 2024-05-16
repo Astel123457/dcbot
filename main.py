@@ -52,6 +52,8 @@ model = "mistral-large-latest"
 
 stop = False
 
+discontinued = ["!imgtovid", "!coin", "!dice", "!spam", "!secure_password", "!dm"]
+
 client = MistralAsyncClient(api_key=api_key)
 
 #list of engines and their location as well as storing games
@@ -216,6 +218,8 @@ async def on_message(message, is_edit = False):
         return
     check = message.content.lower()
     message_author = str(message.author)
+    if f"{message.content.split(' ')[0]}" in discontinued:
+        await message.reply("This command has been discontinued! Please use the new slash command instead.")
     if message.content.startswith('$'):
         current = await message.reply("...")
         queue = asyncio.Queue(maxsize=1)
@@ -227,6 +231,8 @@ async def on_message(message, is_edit = False):
             async for chunk in client.chat_stream(model=model, messages=message_history.construct_history()):  
                 if chunk.choices[0].delta.content == None:
                     continue
+                if len(cur) > 1950:
+                        cur = ""
                 cur += chunk.choices[0].delta.content
                 total += chunk.choices[0].delta.content
                 new = False
@@ -244,11 +250,11 @@ async def on_message(message, is_edit = False):
                     break
                 else:
                     if len(cur) > 1950:
-                        cur = [cur[i:i + len(cur)] for i in range(0, len(cur), 1950)][-1]
                         current = await message.reply("...")
                     elif not queue.empty():
                         queue.get_nowait()
                     await queue.put((cur, True, current))
+            print(total)
             message_history.add(ChatMessage(role="assistant", content=total))
 
     if not is_edit:
@@ -264,7 +270,7 @@ async def on_message(message, is_edit = False):
     #     await message.channel.send("a")
     #     await asyncio.sleep(0.5)
     #     await message.channel.send("sports")
-            if message.author.name == "IDOLTRASH":
+            if message.author.id == 400682993464901634:
                 niagarafalls = ["changed", "change"]
                 thispussy = any
                 thong = message.content.lower()
@@ -284,8 +290,6 @@ async def secure_password(ctx):
     result_str = ''.join((random.choice('qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM,.;[]1234567890-=_+') for i in range(random.randint(6,13))))
     await ctx.send("Here is a password!")
     await ctx.send(result_str)
-
-
 
 @bot.command()
 async def timer(ctx, time = 10):
@@ -328,47 +332,29 @@ async def try_resend_file(ctx, file_objects):
     else:
         await ctx.send(files=file_objects)
 
-async def getinf(ctx, url, headers, id, filename):
+async def getinf(url, headers, id, filename):
     while True:
         try:
             check = requests.get(f"{url}/result/{id}", headers=headers)
-        
             if check.status_code == 200:
                 print(check.status_code)
                 if filename == "video.mp4":
-                    try:
-                        fstream = io.BytesIO(base64.b64decode(check.json()['video']))
-                        fstream.seek(0)
-                        await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="video.mp4"))
-                    except aiohttp.client_exceptions.ClientOSError:
-                        upload = uploader.upload(file_type="mp4", file_raw=fstream)
-                        upload = upload["file"]
-                        await ctx.reply(f"ID: {id}\n{upload}")
+                    fstream = io.BytesIO(base64.b64decode(check.json()['video']))
+                    fstream.seek(0)
+                    return discord.File(fstream, filename="video.mp4")
                 else:
-                    try:
-                        fstream = io.BytesIO(base64.b64decode(check.json()['image']))
-                        fstream.seek(0)
-                        await ctx.reply(f"ID: {id}", file=discord.File(fstream, filename="image.png"))
-                    except aiohttp.client_exceptions.ClientOSError:
-                        with open("img.png", "wb") as file:
-                            file.write(fstream.read())
-                        upload = uploader.upload(file_type="png", file_raw=fstream.read())
-                        upload = upload["file"]
-                        print(upload)
-                        await ctx.reply(f"ID: {id}\n{upload}")
-                        
-                break
+                    fstream = io.BytesIO(base64.b64decode(check.json()['image']))
+                    fstream.seek(0)
+                    return discord.File(fstream, filename="image.png")
             elif check.status_code == 403:
-                await ctx.reply(f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {check.text}")
-                return
+                return f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {check.text}"
             elif check.status_code != 202:
-                await ctx.reply(f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}")
-                break
+                return f"There was an error generating the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}"
+
             await asyncio.sleep(2)
         except Exception as e:
             print(traceback.format_exc())
-            await ctx.reply(f"There was an error getting the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}\nError Details: {e}")
-            break
+            return f"There was an error getting the video! Please try again or use `!getvid` with the ID to try getting the video again.\nID: {id}\nError Details: {e}"
 
 @bot.command()
 async def getvid(ctx, id = None):
@@ -394,20 +380,16 @@ async def getupscale(ctx, id = None):
     url = "https://api.stability.ai/v2beta/stable-image/upscale/creative"
     await getinf(ctx, url, headers2, id, "img.png")
 
-@bot.command()
-async def imgtovid(ctx, motion: int = 40):
+@bot.tree.command(description="Takes an input video and converts it into a video")
+@app_commands.describe(file="The video to convert.")
+@app_commands.describe(motion="The amount of motion the ai should generate. Must be between 1 and 255.")
+async def imgtovid(interaction: discord.Interaction, file: discord.Attachment, motion: int = 40):
     url = "https://api.stability.ai/v2beta/image-to-video"
-    if len(ctx.message.attachments) == 0:
-        await ctx.send("You must attach an image to this command!")
-        return
-    if len(ctx.message.attachments) > 1:
-        await ctx.send("You can only attach one image at a time!")
-        return
-    await ctx.reply("Please note that this may take a while to generate!")
+    await interaction.response.defer()
     if motion > 255 or motion < 1:
-        await ctx.reply("`Motion` parameter must be between 255 and 1")
+        await interaction.followup.send("`Motion` parameter must be between 255 and 1", ephemeral=True)
     # Assuming org_image is obtained from ctx.message.attachments[0].read()
-    org_image = await ctx.message.attachments[0].read()
+    org_image = await file.read()
     img = Image.open(io.BytesIO(org_image))
     
     max_size = 768
@@ -453,7 +435,52 @@ async def imgtovid(ctx, motion: int = 40):
     }
     response = requests.post(url, files=payload, headers=headers)
     print(response.json()["id"])
-    task = asyncio.create_task(getinf(ctx, url, headers2, response.json()["id"], "video.mp4"))
+    task = asyncio.create_task(getinf(url, headers2, response.json()["id"], "video.mp4"))
+    await task
+    task = task.result()
+    if isinstance(task, discord.File):
+        await interaction.followup.send(file=task)
+    else:
+        await interaction.followup.send(task, ephemeral=True)
+
+@bot.tree.command(description="Takes an image and searches then replaces items based on a prompt.")
+@app_commands.describe(prompt="The prompt to regenerate the image with.")
+@app_commands.describe(search_prompt="The item/person to search for.")
+@app_commands.describe(file="The image to search and replace.")
+async def search_and_replace(interaction: discord.Interaction, prompt: str, search_prompt:str, file: discord.Attachment, negative_prompt: str = None):
+    await interaction.response.defer()
+    url = "https://api.stability.ai/v2beta/stable-image/edit/search-and-replace"
+    headers = {
+        'Authorization': f"Bearer {cs.stability_key}",
+        "accept": "application/json"
+    }
+    f = await file.read()
+    f = Image.open(io.BytesIO(f))
+    image = io.BytesIO()
+    f.save(image, format='PNG')
+    image.seek(0)
+    files = {
+        "image" : ("image.png", image)
+    }
+    data = {
+        "prompt": prompt,
+        "search_prompt": search_prompt,
+        "output_format": "png",
+    }
+    if negative_prompt:
+        data["negative_prompt"] = negative_prompt
+
+    response = requests.post(url, files=files, data=data, headers=headers)
+    if response.status_code == 403:
+        await interaction.followup.send(f"Your image or prompt was flagged by Stability AI's content system, if you belive this was a mistake, try again.\nError Details: {response.text}", ephemeral=True)
+        return
+    elif response.status_code != 200:
+        await interaction.followup.send(f"An error occured while processing the image! Please try again.\nError Details: {response.text}", ephemeral=True)
+        return
+    else:
+        image = io.BytesIO(base64.b64decode(response.json()["image"]))
+        image.seek(0)
+        await interaction.followup.send(file=discord.File(image, filename="image.png"))
 
 @bot.command()
 async def promptupscale(ctx, *, prompt):
@@ -525,6 +552,14 @@ async def inspireme(ctx, timetotal = "1"):
     except:
         await ctx.send("There was an error sending the files! Please try again!")
 
+
+async def style_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    types = list(STYLE_LIST.keys())
+    return [
+        app_commands.Choice(name=search_type, value=search_type)
+        for search_type in types if current.lower() in search_type.lower()
+    ][:25]
+
 user_last_prompt = {}
 @bot.tree.command(name="sd",description="Generates a random image from a prompt.")
 @app_commands.describe(prompt="The prompt to generate an image from.")
@@ -534,6 +569,7 @@ user_last_prompt = {}
 @app_commands.describe(style="The style to use for the image.")
 @app_commands.rename(is_mistral="mistral")
 @app_commands.rename(neg_prompt="negitive-prompt")
+@app_commands.autocomplete(style=style_autocomplete)
 async def csd(interaction: discord.Interaction, prompt: str, is_mistral: bool = False, quality: bool = False, neg_prompt: str = None, style: str = None):
     global negitive_prompt
     try:
@@ -550,27 +586,35 @@ async def csd(interaction: discord.Interaction, prompt: str, is_mistral: bool = 
             mistral = await chat_response
             mistral = mistral.choices[0].message.content
         start_time = time.time()
+        if quality:
+            quality = "hd"
+        else:
+            quality = "standard"
         if neg_prompt == None:
             neg_prompt = negitive_prompt
-        
-        res = requests.post(f"https://api.deepai.org/api/{generator}", data={'text': prompt, "grid_size": "1", 'negative_prompt': neg_prompt, 'image_generator_version': quality, }, headers={'api-key': cs.deepai}, timeout=25,)
         if style in STYLE_LIST.keys():
             generator = STYLE_LIST[style]
+        else:
+            generator = STYLE_LIST["default"]
+        print(quality)
+        res = requests.post(f"https://api.deepai.org/api/{generator}", data={'text': prompt, "grid_size": "1", 'negative_prompt': neg_prompt, 'image_generator_version': quality, }, headers={'api-key': cs.deepai}, timeout=25,)
         data = res.json()
+        print(data)
         image = requests.get(data["output_url"])
         endtime = time.time() - start_time
         if is_mistral:
-            if generator == "stable-diffusion":
+            if generator == "text2img":
                 await interaction.followup.send(f"Here is your \"{prompt}\".\nMistralAI edited your prompt for more detail:\n```{mistral}```\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
             else:
                 await interaction.followup.send(f"Please note this was generated with the `{style}` style.\nHere is your \"{prompt}\".\nMistralAI edited your prompt for more detail:\n```{mistral}```\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
         else:
-            if generator == "stable-diffusion":
+            if generator == "text2img":
                 await interaction.followup.send(f"Here is your \"{prompt}\".\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))
             else:
                 await interaction.followup.send(f"Please note this was generated with the `{style}` style.\nHere is your \"{prompt}\".\nGeneration took {round(endtime, 2)} seconds!", file=discord.File(io.BytesIO(image.content), filename=f"sd.png"))  
-    except:
-        await interaction.followup.send("There was an error, please try again!", empheral=True)
+    except Exception as e:
+        print(traceback.format_exc())
+        await interaction.followup.send("There was an error, please try again!", ephemeral=True)
     
 
 @bot.command()
@@ -1149,7 +1193,7 @@ async def dice(interaction: discord.Interaction, dice: int, num: int):
     rolls_list = rolls_list + ', '.join(str(e) for e in rolls)
     rolls_list = rolls_list + "]"
     if len(rolls_list) > 2000:
-        await interaction.response.send_message("Sorry, but the reply would go over Discord's character limit so we can't send it! Please reduce the number of dice rolls to help.", empheral=True)
+        await interaction.response.send_message("Sorry, but the reply would go over Discord's character limit so we can't send it! Please reduce the number of dice rolls to help.", ephemeral=True)
     else:
         await interaction.response.send_message(rolls_list)
 
@@ -1394,33 +1438,6 @@ async def deepfry(ctx, color = 2.0, contrast = 2.0, sharpness = 2.0, noise = 1):
         
         files.append(discord.File(io.BytesIO(pil_to_bytes(noisy_img)), filename=f"deepfry_{attachment.filename}"))
     await try_resend_file(ctx, files)
-
-
-async def style_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    types = list(STYLE_LIST.keys())
-    return [
-        app_commands.Choice(name=search_type, value=search_type)
-        for search_type in types if current.lower() in search_type.lower()
-    ]
-
-@bot.tree.command(description="Changes the sytle of Stable Diffusion, or lists the current style.")
-@app_commands.autocomplete(input=style_autocomplete)
-async def style(interaction: discord.Interaction, input: str = None):
-    global curr_style
-    if input == None:
-        if interaction.user.id not in curr_style:
-            await interaction.send(f"The current style is `{curr_style['default']}`")
-            return
-        await interaction.send(f"The current style is `{curr_style[interaction.user.id]}`!")
-        return
-    if input.lower() == "list":
-        await interaction.send("Here is a list of supported styles!\n```" + "\n".join(STYLE_LIST.keys()) + "```")
-        return
-    try:
-        curr_style[interaction.user.id] = STYLE_LIST[input.lower()]
-        await interaction.send(f"Style set to `{input}` for {interaction.user.display_name}!")
-    except KeyError:
-        await interaction.send("That style is not supported! Please use `!style list` to see a list of supported styles!")
 
 @bot.command()
 async def luhn_check(ctx, card):

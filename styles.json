@@ -4,7 +4,7 @@
     "cyberpunk-dystopian": "dystopian-cyberpunk-generator",
     "steampunk": "steampunk-generator",
     "steampunk-landscape": "steampunk-landscape-generator",
-    "default": "stable-diffusion",
+    "default": "text2img",
     "architect-future": "future-architecture-generator",
     "architect-contemporary": "contemporary-architecture-generator",
     "architect-watercolor": "watercolor-architecture-generator",
